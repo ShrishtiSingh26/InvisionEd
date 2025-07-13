@@ -110,6 +110,7 @@ export default function InVisionEdInterface() {
   const [showActions, setShowActions] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isReading, setIsReading] = useState(false);
+  const [isAskingQuestion, setIsAskingQuestion] = useState(false); // Add near your other state variables
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -230,7 +231,7 @@ export default function InVisionEdInterface() {
   }
 
   const handleSendMessage = (message: string = newMessage) => {
-    if (!message.trim()) return
+    if (!message.trim()) return;
 
     const userMessage: ChatMessage = {
       id: Date.now(),
@@ -241,19 +242,27 @@ export default function InVisionEdInterface() {
 
     setChatMessages((prev) => [...prev, userMessage])
     setNewMessage("")
-    setIsTyping(true)
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: ChatMessage = {
-        id: Date.now() + 1,
-        type: "ai",
-        message: `I understand you said: "${message.trim()}". Let me help you with that. This is a simulated AI response that would analyze your request and provide relevant information.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }
-      setChatMessages((prev) => [...prev, aiMessage])
-      setIsTyping(false)
-    }, 2000)
+    
+    // Check if we're in question mode
+    if (isAskingQuestion) {
+      setIsAskingQuestion(false);
+      // Handle as a document question
+      handleAskQuestion(message.trim());
+    } else {
+      // Handle as a regular message (existing code)
+      setIsTyping(true);
+      
+      setTimeout(() => {
+        const aiMessage: ChatMessage = {
+          id: Date.now() + 1,
+          type: "ai",
+          message: `I understand you said: "${message.trim()}". Let me help you with that. This is a simulated AI response that would analyze your request and provide relevant information.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+        setChatMessages((prev) => [...prev, aiMessage]);
+        setIsTyping(false);
+      }, 2000);
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -503,12 +512,8 @@ ${documentText.substring(0, 30000)}
   // Use environment variable for API key instead of hardcoding
   const summarizeWithGeminiDirect = async (text: string): Promise<string> => {
     try {
-      // Use environment variable for API key - should be defined in .env.local
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error('Missing API key');
-      }
+      // Use the direct API key instead of environment variable
+      const GEMINI_API_KEY = "AIzaSyC8EHY_xcWwh600B9pvtYX2maXkXV--BiQ";
       
       const prompt = `Please provide a concise, well-structured summary of the following text extracted from a document. Focus on the key points, main arguments, and conclusions.\n\nTEXT:\n"""\n${text.substring(0, 30000)}\n"""`;
       
@@ -519,7 +524,7 @@ ${documentText.substring(0, 30000)}
       
       let chatHistory: GeminiMessage[] = [{ role: "user", parts: [{ text: prompt }] }];
       const payload = { contents: chatHistory };
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
       
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -561,15 +566,8 @@ ${documentText.substring(0, 30000)}
         throw new Error("No document content found to answer questions about.");
       }
       
-      // Create user question message
-      const userMessage: ChatMessage = {
-        id: Date.now(),
-        type: "user",
-        message: question.trim(),
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }
-      setChatMessages((prev) => [...prev, userMessage]);
-      
+      // Note: We're not adding the user message here anymore, since it's already added by handleSendMessage
+    
       // Use Gemini API directly for Q&A
       const prompt = `Based on the following document text, provide a clear and concise answer to the user's question. If the answer isn't in the text, say that you cannot find the answer in the provided document.\n\nDOCUMENT TEXT:\n"""\n${documentText.substring(0, 30000)}\n"""\n\nUSER'S QUESTION:\n"${question}"`;
       
@@ -581,7 +579,7 @@ ${documentText.substring(0, 30000)}
         type: "ai",
         message: answer,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }
+      };
       setChatMessages((prev) => [...prev, aiMessage]);
       
     } catch (error) {
@@ -593,7 +591,7 @@ ${documentText.substring(0, 30000)}
         type: "ai",
         message: "I'm sorry, I couldn't answer your question about the document. Please try again.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }
+      };
       setChatMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsTyping(false);
@@ -709,18 +707,33 @@ ${documentText.substring(0, 30000)}
             {selectedFile && (
               <Button 
                 onClick={() => {
-                  const question = prompt("What would you like to know about this document?");
-                  if (question) handleAskQuestion(question);
+                  // Add an AI message prompting the user to ask a question
+                  const promptMessage: ChatMessage = {
+                    id: Date.now(),
+                    type: "ai",
+                    message: "Please ask any question about the document, and I'll answer based on its content.",
+                    timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                  };
+                  setChatMessages((prev) => [...prev, promptMessage]);
+                  
+                  // Set question mode active
+                  setIsAskingQuestion(true);
+                  
+                  // Auto-focus the chat input
+                  setTimeout(() => {
+                    const chatInput = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+                    if (chatInput) chatInput.focus();
+                  }, 100);
                 }}
                 size="sm"
                 variant="outline"
                 className={`flex items-center space-x-1 text-xs ${
                   isDarkMode ? "bg-purple-600 hover:bg-purple-700 text-white" : "bg-purple-500 hover:bg-purple-600 text-white"
                 }`}
-                disabled={isTyping}
+                disabled={isTyping || isAskingQuestion}
               >
                 <Sparkles className="w-3 h-3 mr-1" />
-                Ask Question
+                {isAskingQuestion ? "Waiting for question..." : "Ask Question"}
               </Button>
             )}
           </div>
